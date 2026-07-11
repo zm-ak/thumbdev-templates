@@ -1,5 +1,8 @@
 # タスク: 実装計画に従ったコード生成
 
+> 入力: `docs/plan/実装計画.md`、CLAUDE.md、`docs/development/`
+> 出力: タスクIssue・実装ブランチ・PR（最大 `$MAX_TASKS` 件）
+
 ## 目的
 
 `docs/plan/実装計画.md` に従い、未着手タスクを実装してPRを作成する。
@@ -23,7 +26,8 @@
    - デフォルトブランチから `feature/issue-<Issue番号>-<slug>` ブランチを作成する
    - 実装計画・設計ドキュメントの範囲のみ実装する（範囲外のリファクタ禁止）
    - package.json 等からこのリポジトリで利用可能な lint / typecheck / test コマンドを
-     検出して実行し、エラーがあれば修正する
+     検出して実行し、エラーがあれば修正する。
+     ただし、変更がドキュメント（.md ファイル）のみの場合は省略してよい
    - Conventional Commits形式でコミットし、ブランチをpushする
    - PRを作成する（`gh pr create`）。.github/pull_request_template.md が存在する場合は
      その構成に沿い、変更内容・目的・確認内容・影響範囲を記載する

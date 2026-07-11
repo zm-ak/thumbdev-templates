@@ -2,10 +2,10 @@ name: Claude Code - Docs Pipeline
 
 # ThumbDevアプリで登録した1次ドキュメント（__DOCS_PATH__/ 配下）が
 # デフォルトブランチへマージされたら起動し、以下を順に実行して1本のPRとして提案する。
-#   1. リポジトリ説明の生成          (claude-haiku-4-5)
-#   2. ドキュメントフォルダ構成整理    (claude-sonnet-5)
-#   3. CLAUDE.mdの整理              (claude-sonnet-5)
-#   4. プロジェクトルールの整理       (claude-sonnet-5)
+#   1. ドキュメントフォルダ構成整理    (claude-sonnet-5)
+#   2. CLAUDE.mdの整理              (claude-sonnet-5)
+#   3. プロジェクトルールの整理       (claude-sonnet-5)
+#   4. リポジトリ説明の生成          (claude-haiku-4-5)
 #   5. 実装計画の生成                (claude-opus-4-8)
 # このPRがマージされると claude-plan-to-code.yml がコード生成を開始する。
 #
@@ -63,18 +63,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$PIPELINE_BRANCH"
 
-      - name: 1. リポジトリ説明の生成 (haiku)
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: >-
-            --model claude-haiku-4-5
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
-          prompt: |
-            .github/claude/prompts/describe-repo.md を読み、その指示に従って作業すること。
-            ${{ env.COMMON_RULES }}
-
-      - name: 2. ドキュメントフォルダ構成整理 (sonnet)
+      - name: 1. ドキュメントフォルダ構成整理 (sonnet)
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -85,7 +74,7 @@ jobs:
             .github/claude/prompts/organize-docs.md を読み、その指示に従って作業すること。
             ${{ env.COMMON_RULES }}
 
-      - name: 3. CLAUDE.mdの整理 (sonnet)
+      - name: 2. CLAUDE.mdの整理 (sonnet)
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -96,7 +85,7 @@ jobs:
             .github/claude/prompts/organize-claude-md.md を読み、その指示に従って作業すること。
             ${{ env.COMMON_RULES }}
 
-      - name: 4. プロジェクトルールの整理 (sonnet)
+      - name: 3. プロジェクトルールの整理 (sonnet)
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -105,6 +94,17 @@ jobs:
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/organize-rules.md を読み、その指示に従って作業すること。
+            ${{ env.COMMON_RULES }}
+
+      - name: 4. リポジトリ説明の生成 (haiku)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-haiku-4-5
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
+          prompt: |
+            .github/claude/prompts/describe-repo.md を読み、その指示に従って作業すること。
             ${{ env.COMMON_RULES }}
 
       - name: 5. 実装計画の生成 (opus)
