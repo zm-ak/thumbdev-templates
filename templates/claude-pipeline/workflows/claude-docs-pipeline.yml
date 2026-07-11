@@ -1,0 +1,159 @@
+name: Claude Code - Docs Pipeline
+
+# ThumbDevアプリで登録した1次ドキュメント（__DOCS_PATH__/ 配下）が
+# デフォルトブランチへマージされたら起動し、以下を順に実行して1本のPRとして提案する。
+#   1. リポジトリ説明の生成          (claude-haiku-4-5)
+#   2. ドキュメントフォルダ構成整理    (claude-sonnet-5)
+#   3. CLAUDE.mdの整理              (claude-sonnet-5)
+#   4. プロジェクトルールの整理       (claude-sonnet-5)
+#   5. 実装計画の生成                (claude-opus-4-8)
+# このPRがマージされると claude-plan-to-code.yml がコード生成を開始する。
+#
+# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - '__DOCS_PATH__/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: claude-docs-pipeline
+  cancel-in-progress: false
+
+env:
+  PIPELINE_BRANCH: claude/docs-pipeline-${{ github.run_id }}
+  COMMON_RULES: |
+    共通ルール（必ず守ること）:
+    - 現在チェックアウトされているブランチ上で作業する。ブランチの作成・切替は禁止。
+    - 変更はConventional Commits形式でコミットする。push・PR作成・Issue作成は禁止。
+    - 変更が不要と判断した場合はコミットせず、理由を出力して終了する。
+    - リポジトリにCLAUDE.mdや開発ガイドが存在する場合はそれに従う。
+    - 1次ドキュメント（__DOCS_PATH__/ 配下）の内容を根拠とし、推測で内容を発明しない。
+
+jobs:
+  pipeline:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == github.event.repository.default_branch &&
+       !startsWith(github.event.pull_request.head.ref, 'claude/'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Create pipeline branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$PIPELINE_BRANCH"
+
+      - name: 1. リポジトリ説明の生成 (haiku)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-haiku-4-5
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
+          prompt: |
+            .github/claude/prompts/describe-repo.md を読み、その指示に従って作業すること。
+            ${{ env.COMMON_RULES }}
+
+      - name: 2. ドキュメントフォルダ構成整理 (sonnet)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-sonnet-5
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*),Bash(git mv:*)"
+          prompt: |
+            .github/claude/prompts/organize-docs.md を読み、その指示に従って作業すること。
+            ${{ env.COMMON_RULES }}
+
+      - name: 3. CLAUDE.mdの整理 (sonnet)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-sonnet-5
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*),Bash(git mv:*)"
+          prompt: |
+            .github/claude/prompts/organize-claude-md.md を読み、その指示に従って作業すること。
+            ${{ env.COMMON_RULES }}
+
+      - name: 4. プロジェクトルールの整理 (sonnet)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-sonnet-5
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
+          prompt: |
+            .github/claude/prompts/organize-rules.md を読み、その指示に従って作業すること。
+            ${{ env.COMMON_RULES }}
+
+      - name: 5. 実装計画の生成 (opus)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-opus-4-8
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
+          prompt: |
+            .github/claude/prompts/implementation-plan.md を読み、その指示に従って作業すること。
+            ${{ env.COMMON_RULES }}
+
+      - name: Push branch and create PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          if [ -z "$(git log origin/$DEFAULT_BRANCH..HEAD --oneline)" ]; then
+            echo "変更なしのためPRを作成しません"
+            exit 0
+          fi
+          git push -u origin "$PIPELINE_BRANCH"
+          COMMITS=$(git log origin/$DEFAULT_BRANCH..HEAD --oneline --reverse | sed 's/^/- /')
+          gh pr create \
+            --base "$DEFAULT_BRANCH" \
+            --head "$PIPELINE_BRANCH" \
+            --title "docs: 1次ドキュメントに基づくドキュメント整理と実装計画の生成" \
+            --body "## 概要
+
+          ThumbDevで登録した1次ドキュメントのマージを起点に、AIドキュメントパイプラインが以下を実行しました。
+
+          ## 変更内容
+
+          $COMMITS
+
+          ## 影響範囲
+
+          - ドキュメントのみ（アプリケーションコードは変更していません）
+          - リポジトリ説明（.github/repo-description.txt。マージ後に反映されます）
+          - 実装計画（docs/plan/実装計画.md）
+
+          ## 確認内容
+
+          - [ ] ドキュメントの内容が1次ドキュメントと整合している
+          - [ ] CLAUDE.md が肥大化していない
+          - [ ] 実装計画に問題がない
+
+          ## 注意事項
+
+          このPRを**マージすると、実装計画に従ったコード生成**（claude-plan-to-code.yml）が自動で開始されます。
+          実装計画に問題がある場合はマージ前にこのPR上で修正してください。"

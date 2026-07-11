@@ -1,0 +1,68 @@
+name: Claude Code - Issue to PR
+
+# Issue単位の実装を行う汎用ワークフロー。
+#   - `claude-task` ラベル付きIssueの作成で自動起動
+#   - Issueコメントで「@claude」とメンションすると起動（自動生成されたIssueの実行はこちら）
+#
+# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: write
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-task')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-opus-4-8
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(npm:*),Bash(yarn:*),Bash(pnpm:*),Bash(npx:*)"
+          prompt: |
+            あなたはこのリポジトリの実装担当（Claude Code）です。
+            以下のルールに従ってください。優先度は上から順です。
+
+            1. リポジトリに CLAUDE.md や開発ガイド（docs/ 配下）が存在する場合は必ず読み、従うこと。
+            2. 実装対象は、このIssue（#${{ github.event.issue.number }}）に書かれた範囲のみとする。
+               関係のないリファクタや整形は行わないこと。
+            3. Issueの内容が曖昧、または設計ドキュメントと矛盾する場合は、実装を進めず
+               Issueにコメントで質問を投稿して終了すること（推測で実装しない）。
+            4. 実装が完了したら、package.json 等からこのリポジトリで利用可能な
+               lint / typecheck / test コマンドを検出して実行し、エラーがあれば修正すること。
+               ただし、変更がドキュメント（.md ファイル）のみの場合は省略してよい。
+            5. ブランチ名は `feature/issue-${{ github.event.issue.number }}-<slug>` とする。
+            6. コミットメッセージは Conventional Commits に従うこと（feat:, fix:, refactor: など）。
+            7. 実装が完了したら Pull Request を作成すること（`gh pr create`）。
+               .github/pull_request_template.md が存在する場合はその構成に沿うこと。
+            8. PR本文には、変更内容・目的・確認内容・影響範囲と `Closes #${{ github.event.issue.number }}` を記載すること。
+
+            対象Issue:
+            タイトル: ${{ github.event.issue.title }}
+            ラベル: ${{ join(github.event.issue.labels.*.name, ', ') }}
+            本文:
+            ${{ github.event.issue.body }}

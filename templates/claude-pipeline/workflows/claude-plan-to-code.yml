@@ -1,0 +1,109 @@
+name: Claude Code - Plan to Code
+
+# docs pipeline のPR（claude/docs-pipeline-* ブランチ）がデフォルトブランチへマージされたら起動する。
+#   1. リポジトリ説明（.github/repo-description.txt）をGitHubへ反映
+#   2. docs/plan/実装計画.md に従ってタスクIssueを作成し、先頭から実装してPRを作成 (claude-opus-4-8)
+#
+# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
+# 任意の設定: REPO_ADMIN_TOKEN（repo権限のPAT。リポジトリ説明の自動反映用）
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: claude-plan-to-code
+  cancel-in-progress: false
+
+jobs:
+  apply-repo-description:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == github.event.repository.default_branch &&
+       startsWith(github.event.pull_request.head.ref, 'claude/docs-pipeline-'))
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # リポジトリ説明の変更には Administration 権限が必要なため、GITHUB_TOKEN では失敗する。
+      # 反映したい場合は repo 権限を持つ PAT を REPO_ADMIN_TOKEN シークレットへ登録する。
+      - name: Apply repository description
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN || github.token }}
+        run: |
+          if [ ! -f .github/repo-description.txt ]; then
+            echo "repo-description.txt が無いためスキップ"
+            exit 0
+          fi
+          DESCRIPTION=$(head -n 1 .github/repo-description.txt)
+          if gh repo edit "${{ github.repository }}" --description "$DESCRIPTION"; then
+            echo "リポジトリ説明を反映しました"
+          else
+            echo "::warning::リポジトリ説明を反映できませんでした。REPO_ADMIN_TOKEN シークレット（repo権限のPAT）を設定するか、手動でAbout欄へ設定してください:"
+            echo "::warning::$DESCRIPTION"
+          fi
+
+  generate-code:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == github.event.repository.default_branch &&
+       startsWith(github.event.pull_request.head.ref, 'claude/docs-pipeline-'))
+    runs-on: ubuntu-latest
+    env:
+      MAX_TASKS: 3 # 1回の実行で実装するタスク数の上限
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Guard - implementation plan exists
+        id: plan
+        run: |
+          if [ ! -f docs/plan/実装計画.md ]; then
+            echo "docs/plan/実装計画.md が存在しないためコード生成をスキップします"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 実装計画に従ったコード生成 (opus)
+        if: steps.plan.outputs.exists == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-opus-4-8
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(npm:*),Bash(yarn:*),Bash(pnpm:*),Bash(npx:*)"
+          prompt: |
+            .github/claude/prompts/generate-code.md を読み、その指示に従って作業すること。
+            環境変数: MAX_TASKS=${{ env.MAX_TASKS }}
+            共通ルール:
+            - リポジトリにCLAUDE.mdや開発ガイドが存在する場合はそれに従う。
+            - 実装計画（docs/plan/実装計画.md）の範囲のみ実装する。
+            - コミットメッセージはConventional Commits形式とする。
