@@ -3,6 +3,7 @@ name: Claude Code - Issue to PR
 # Issue単位の実装を行う汎用ワークフロー。
 #   - `claude-task` ラベル付きIssueの作成で自動起動
 #   - Issueコメントで「@claude」とメンションすると起動（自動生成されたIssueの実行はこちら）
+#   - `@claude test` / `@claude security` / `@claude verify` は Pipeline Pro 専用のため除外する
 #
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル
 
@@ -23,7 +24,11 @@ jobs:
   claude:
     if: |
       (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-task')) ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, '@claude') &&
+       !contains(github.event.comment.body, '@claude test') &&
+       !contains(github.event.comment.body, '@claude security') &&
+       !contains(github.event.comment.body, '@claude verify'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
