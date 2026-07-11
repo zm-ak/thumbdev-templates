@@ -4,7 +4,7 @@ name: Claude Code - Issue to PR
 #   - `claude-task` ラベル付きIssueの作成で自動起動
 #   - Issueコメントで「@claude」とメンションすると起動（自動生成されたIssueの実行はこちら）
 #
-# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
+# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル
 
 on:
   issues:

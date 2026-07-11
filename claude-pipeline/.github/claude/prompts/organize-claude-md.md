@@ -1,5 +1,8 @@
 # タスク: CLAUDE.mdの整理
 
+> 入力: 整理済みの `docs/`、既存の CLAUDE.md / `.claude/skills/`（あれば）
+> 出力: 最小限の CLAUDE.md、切り出し先へのリンク
+
 ## 目的
 
 CLAUDE.md を「AIが常に読み込む必要がある最小限の内容」だけに保ち、
