@@ -9,6 +9,13 @@ name: Claude Code - Docs Pipeline
 #   5. 実装計画の生成                (claude-opus-4-8)
 # このPRがマージされると claude-plan-to-code.yml がコード生成を開始する。
 #
+# 再開の仕組み:
+#   パイプラインブランチは実行のたびに新規作成するのではなく、
+#   トリガー元PR番号（無ければ実行ID）から決まる固定名を使い、各ステップの完了後に都度pushする。
+#   途中のステップが失敗した場合、`gh workflow run` の resume_branch 入力に
+#   失敗した実行のブランチ名を指定して再実行すると、完了済みステップ（完了マーカーで判定）は
+#   Claudeを起動せずスキップし、続きから再開する。
+#
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
 
 on:
@@ -17,6 +24,10 @@ on:
     paths:
       - '__DOCS_PATH__/**'
   workflow_dispatch:
+    inputs:
+      resume_branch:
+        description: '再開する既存のパイプラインブランチ名（例: claude/docs-pipeline-123）。未指定なら新規実行'
+        required: false
 
 permissions:
   contents: write
@@ -28,7 +39,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PIPELINE_BRANCH: claude/docs-pipeline-${{ github.run_id }}
+  PIPELINE_BRANCH: ${{ github.event.inputs.resume_branch || format('claude/docs-pipeline-{0}', github.event.pull_request.number || github.run_id) }}
+  PROGRESS_DIR: .github/claude/progress/docs-pipeline
   COMMON_RULES: |
     共通ルール（必ず守ること）:
     - 現在チェックアウトされているブランチ上で作業する。ブランチの作成・切替は禁止。
@@ -36,6 +48,9 @@ env:
     - 変更が不要と判断した場合はコミットせず、理由を出力して終了する。
     - リポジトリにCLAUDE.mdや開発ガイドが存在する場合はそれに従う。
     - 1次ドキュメント（__DOCS_PATH__/ 配下）の内容を根拠とし、推測で内容を発明しない。
+    - このステップの作業が終わったら（変更の有無を問わず）、完了マーカーファイル
+      "${{ env.PROGRESS_DIR }}/<マーカー名>" を空ファイルとして作成し、コミットに含めること。
+      これは再実行時にこのステップをスキップするための目印であり、削除・変更してはならない。
 
 jobs:
   pipeline:
@@ -57,13 +72,33 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Create pipeline branch
+      - name: Prepare pipeline branch（既存なら再開）
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$PIPELINE_BRANCH"
+          if git ls-remote --exit-code --heads origin "$PIPELINE_BRANCH" >/dev/null 2>&1; then
+            echo "既存のパイプラインブランチを検出。再開します: $PIPELINE_BRANCH"
+            git fetch origin "$PIPELINE_BRANCH"
+            git checkout "$PIPELINE_BRANCH"
+          else
+            echo "新規パイプラインブランチを作成します: $PIPELINE_BRANCH"
+            git checkout -b "$PIPELINE_BRANCH"
+          fi
+
+      - name: 完了済みステップの検出
+        id: progress
+        run: |
+          check() {
+            [ -f "$PROGRESS_DIR/$1" ] && echo true || echo false
+          }
+          echo "step1_done=$(check step1-organize-docs.done)" >> "$GITHUB_OUTPUT"
+          echo "step2_done=$(check step2-claude-md.done)" >> "$GITHUB_OUTPUT"
+          echo "step3_done=$(check step3-rules.done)" >> "$GITHUB_OUTPUT"
+          echo "step4_done=$(check step4-describe-repo.done)" >> "$GITHUB_OUTPUT"
+          echo "step5_done=$(check step5-implementation-plan.done)" >> "$GITHUB_OUTPUT"
 
       - name: 1. ドキュメントフォルダ構成整理 (sonnet)
+        if: steps.progress.outputs.step1_done != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -72,9 +107,15 @@ jobs:
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*),Bash(git mv:*)"
           prompt: |
             .github/claude/prompts/organize-docs.md を読み、その指示に従って作業すること。
+            完了マーカー: ${{ env.PROGRESS_DIR }}/step1-organize-docs.done
             ${{ env.COMMON_RULES }}
 
+      - name: 1. の進捗をpush
+        if: steps.progress.outputs.step1_done != 'true'
+        run: git push -u origin "$PIPELINE_BRANCH"
+
       - name: 2. CLAUDE.mdの整理 (sonnet)
+        if: steps.progress.outputs.step2_done != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -83,9 +124,15 @@ jobs:
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*),Bash(git mv:*)"
           prompt: |
             .github/claude/prompts/organize-claude-md.md を読み、その指示に従って作業すること。
+            完了マーカー: ${{ env.PROGRESS_DIR }}/step2-claude-md.done
             ${{ env.COMMON_RULES }}
 
+      - name: 2. の進捗をpush
+        if: steps.progress.outputs.step2_done != 'true'
+        run: git push -u origin "$PIPELINE_BRANCH"
+
       - name: 3. プロジェクトルールの整理 (sonnet)
+        if: steps.progress.outputs.step3_done != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -94,9 +141,15 @@ jobs:
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/organize-rules.md を読み、その指示に従って作業すること。
+            完了マーカー: ${{ env.PROGRESS_DIR }}/step3-rules.done
             ${{ env.COMMON_RULES }}
 
+      - name: 3. の進捗をpush
+        if: steps.progress.outputs.step3_done != 'true'
+        run: git push -u origin "$PIPELINE_BRANCH"
+
       - name: 4. リポジトリ説明の生成 (haiku)
+        if: steps.progress.outputs.step4_done != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -105,9 +158,15 @@ jobs:
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/describe-repo.md を読み、その指示に従って作業すること。
+            完了マーカー: ${{ env.PROGRESS_DIR }}/step4-describe-repo.done
             ${{ env.COMMON_RULES }}
 
+      - name: 4. の進捗をpush
+        if: steps.progress.outputs.step4_done != 'true'
+        run: git push -u origin "$PIPELINE_BRANCH"
+
       - name: 5. 実装計画の生成 (opus)
+        if: steps.progress.outputs.step5_done != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -116,7 +175,18 @@ jobs:
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/implementation-plan.md を読み、その指示に従って作業すること。
+            完了マーカー: ${{ env.PROGRESS_DIR }}/step5-implementation-plan.done
             ${{ env.COMMON_RULES }}
+
+      - name: 5. の進捗をpush
+        if: steps.progress.outputs.step5_done != 'true'
+        run: git push -u origin "$PIPELINE_BRANCH"
+
+      - name: 失敗時の再開手順を出力
+        if: failure()
+        run: |
+          echo "::warning::パイプラインが途中で失敗しました。進捗はブランチ '$PIPELINE_BRANCH' に保存済みです。"
+          echo "::warning::再開するには Actions から本ワークフローを 'Run workflow' で実行し、resume_branch に '$PIPELINE_BRANCH' を指定してください。完了済みステップはスキップされます。"
 
       - name: Push branch and create PR
         env:
@@ -127,8 +197,17 @@ jobs:
             echo "変更なしのためPRを作成しません"
             exit 0
           fi
+          # 進捗マーカーはPRには不要なため、最終pushの前に取り除く
+          if [ -d "$PROGRESS_DIR" ]; then
+            git rm -r --quiet "$PROGRESS_DIR"
+            git commit -m "chore: docs-pipelineの進捗マーカーを削除"
+          fi
           git push -u origin "$PIPELINE_BRANCH"
           COMMITS=$(git log origin/$DEFAULT_BRANCH..HEAD --oneline --reverse | sed 's/^/- /')
+          if gh pr view "$PIPELINE_BRANCH" --json number >/dev/null 2>&1; then
+            echo "既存のPRが見つかったため作成をスキップします"
+            exit 0
+          fi
           gh pr create \
             --base "$DEFAULT_BRANCH" \
             --head "$PIPELINE_BRANCH" \
