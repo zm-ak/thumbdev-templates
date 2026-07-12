@@ -2,7 +2,8 @@ name: Claude Code - Issue to PR
 
 # Issue単位の実装を行う汎用ワークフロー。
 #   - `claude-task` ラベル付きIssueの作成で自動起動
-#   - Issueコメントで「@claude」とメンションすると起動（自動生成されたIssueの実行はこちら）
+#     （plan-to-code が Claude Bot として作成した Issue も含む → allowed_bots 必須）
+#   - Issueコメントで「@claude」とメンションすると起動
 #   - `claude-resume` ラベルを付与すると、既存の作業ブランチと直前の「作業経過」コメントから再開する
 #   - `@claude test` / `@claude security` / `@claude verify` は Pipeline Pro 専用のため除外する
 #
@@ -59,6 +60,8 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN || github.token }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # plan-to-code が Claude Bot として作成した Issue 起点を許可する
+          allowed_bots: "claude"
           claude_args: >-
             --model claude-opus-4-8
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(npm:*),Bash(yarn:*),Bash(pnpm:*),Bash(npx:*)"
