@@ -3,9 +3,16 @@ name: Claude Code - Issue to PR
 # Issue単位の実装を行う汎用ワークフロー。
 #   - `claude-task` ラベル付きIssueの作成で自動起動
 #   - Issueコメントで「@claude」とメンションすると起動（自動生成されたIssueの実行はこちら）
+#   - `claude-resume` ラベルを付与すると、既存の作業ブランチと直前の「作業経過」コメントから再開する
 #   - `@claude test` / `@claude security` / `@claude verify` は Pipeline Pro 専用のため除外する
 #
-# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル
+# 再開の仕組み:
+#   実装が完了しなかった場合でも、進行中の変更はコミット・pushされ、
+#   Issueに「## 作業経過」コメントとして完了内容・次にやることが残る。
+#   `claude-resume` ラベルの付与、または `@claude` コメントで再実行すると、
+#   既存の作業ブランチをチェックアウトし、直前の作業経過から続きを実施する（最初からやり直さない）。
+#
+# 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル、`claude-resume` ラベル
 
 on:
   issues:
@@ -23,7 +30,9 @@ permissions:
 jobs:
   claude:
     if: |
-      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-task')) ||
+      (github.event_name == 'issues' &&
+       (contains(github.event.issue.labels.*.name, 'claude-task') ||
+        contains(github.event.issue.labels.*.name, 'claude-resume'))) ||
       (github.event_name == 'issue_comment' &&
        contains(github.event.comment.body, '@claude') &&
        !contains(github.event.comment.body, '@claude test') &&
@@ -61,10 +70,27 @@ jobs:
                lint / typecheck / test コマンドを検出して実行し、エラーがあれば修正すること。
                ただし、変更がドキュメント（.md ファイル）のみの場合は省略してよい。
             5. ブランチ名は `feature/issue-${{ github.event.issue.number }}-<slug>` とする。
+               作業開始前に `git ls-remote --heads origin` で同名パターンの
+               ブランチが既に存在するか確認すること。
+               - 存在する場合（前回の実行が途中で終了した再開のケース）:
+                 そのブランチを `git fetch` してチェックアウトする（新規ブランチは作らない）。
+                 既存のコミット履歴と、このIssueの最新の「## 作業経過」コメントを読み、
+                 そこまでの内容を前提に続きから作業する。設計や実装済み部分をやり直さない。
+               - 存在しない場合: 新規にブランチを作成する。
             6. コミットメッセージは Conventional Commits に従うこと（feat:, fix:, refactor: など）。
+               実装がまとまった単位（ファイル群・機能単位）に分けられる場合は、
+               完了するたびにコミットしてブランチをpushすること
+               （最後まで気づかれずに失敗すると、pushされていない変更は失われるため）。
             7. 実装が完了したら Pull Request を作成すること（`gh pr create`）。
                .github/pull_request_template.md が存在する場合はその構成に沿うこと。
             8. PR本文には、変更内容・目的・確認内容・影響範囲と `Closes #${{ github.event.issue.number }}` を記載すること。
+            9. 実装が完了しなかった場合（3. で質問を投稿した場合、エラーで続行できなくなった場合を含む）は、
+               それまでの変更を必ずコミット・pushした上で、このIssueに
+               「## 作業経過」から始まるコメントを投稿すること。内容は次の2点を箇条書きで含める。
+               - 完了したこと
+               - 次にやるべきこと（再開する担当者がゼロから読み直さなくて済む具体性で書く）
+               人間が `claude-resume` ラベルを付与するか `@claude` とコメントすると、
+               このワークフローが再度起動し、上記のブランチと作業経過をもとに続きから実行される。
 
             対象Issue:
             タイトル: ${{ github.event.issue.title }}
