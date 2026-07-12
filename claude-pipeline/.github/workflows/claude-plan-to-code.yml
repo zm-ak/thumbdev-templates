@@ -5,7 +5,7 @@ name: Claude Code - Plan to Code
 #   2. docs/plan/実装計画.md に従ってタスクIssueを作成し、先頭から実装してPRを作成 (claude-opus-4-8)
 #
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
-# 任意の設定: REPO_ADMIN_TOKEN（repo権限のPAT。リポジトリ説明の自動反映用）
+# 任意の設定: REPO_ADMIN_TOKEN（repo権限のPAT。リポジトリ説明の自動反映、およびPR作成が許可されない場合のフォールバック用）
 
 on:
   pull_request:
@@ -94,7 +94,9 @@ jobs:
         if: steps.plan.outputs.exists == 'true'
         uses: anthropics/claude-code-action@v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          # タスクIssueの作成・PR作成の両方でgh CLIを使うため、
+          # GITHUB_TOKENでのPR作成が許可されていない場合に備えてPATをフォールバックにする。
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN || github.token }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-

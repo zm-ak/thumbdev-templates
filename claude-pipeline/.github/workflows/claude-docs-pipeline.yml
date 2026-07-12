@@ -190,7 +190,10 @@ jobs:
 
       - name: Push branch and create PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          # GITHUB_TOKENでのPR作成は、リポジトリ設定で
+          # 「Allow GitHub Actions to create and approve pull requests」が無効だと失敗する。
+          # repoスコープのPATを REPO_ADMIN_TOKEN シークレットに登録しておくと、その設定に関わらず作成できる。
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN || github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           if [ -z "$(git log origin/$DEFAULT_BRANCH..HEAD --oneline)" ]; then
@@ -208,7 +211,7 @@ jobs:
             echo "既存のPRが見つかったため作成をスキップします"
             exit 0
           fi
-          gh pr create \
+          if ! gh pr create \
             --base "$DEFAULT_BRANCH" \
             --head "$PIPELINE_BRANCH" \
             --title "docs: 1次ドキュメントに基づくドキュメント整理と実装計画の生成" \
@@ -235,4 +238,12 @@ jobs:
           ## 注意事項
 
           このPRを**マージすると、実装計画に従ったコード生成**（claude-plan-to-code.yml）が自動で開始されます。
-          実装計画に問題がある場合はマージ前にこのPR上で修正してください。"
+          実装計画に問題がある場合はマージ前にこのPR上で修正してください。"; then
+            echo "::error::PRの作成に失敗しました。変更はブランチ '$PIPELINE_BRANCH' へpush済みです。"
+            echo "::error::原因: GitHub ActionsからのPR作成が許可されていない可能性があります。"
+            echo "::error::対処1（推奨）: リポジトリの Settings > Actions > General > Workflow permissions で"
+            echo "::error::  「Allow GitHub Actions to create and approve pull requests」を有効にする。"
+            echo "::error::対処2: repoスコープのPATを REPO_ADMIN_TOKEN という名前のActions Secretに登録する。"
+            echo "::error::解決後、本ワークフローを 'Run workflow' から resume_branch=$PIPELINE_BRANCH で再実行してください。"
+            exit 1
+          fi
