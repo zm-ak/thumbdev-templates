@@ -13,6 +13,7 @@ name: Claude Code - Issue to PR
 #   既存の作業ブランチをチェックアウトし、直前の作業経過から続きを実施する（最初からやり直さない）。
 #
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル、`claude-resume` ラベル
+# 任意の設定: REPO_ADMIN_TOKEN（repoスコープのPAT。GITHUB_TOKENでのPR作成が許可されない場合のフォールバック用）
 
 on:
   issues:
@@ -52,6 +53,10 @@ jobs:
 
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
+        env:
+          # gh pr create 等のgh CLI操作を認証するために必要（未設定だとgh CLIが認証エラーになる）。
+          # GITHUB_TOKENでのPR作成が許可されていない場合はREPO_ADMIN_TOKEN（repoスコープのPAT）をフォールバックに使う。
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN || github.token }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
