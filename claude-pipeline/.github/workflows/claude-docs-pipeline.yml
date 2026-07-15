@@ -14,7 +14,13 @@ name: Claude Code - Docs Pipeline
 #   トリガー元PR番号（無ければ実行ID）から決まる固定名を使い、各ステップの完了後に都度pushする。
 #   途中のステップが失敗した場合、`gh workflow run` の resume_branch 入力に
 #   失敗した実行のブランチ名を指定して再実行すると、完了済みステップ（完了マーカーで判定）は
-#   Claudeを起動せずスキップし、続きから再開する。
+#   Claudeを起動せずスキップし、続きから再開する（issue-to-prのハンドオフファイルと同様、
+#   ステップ単位で「どこまで終わったか」をブランチ上に残す設計のため、Issueコメントのような
+#   再開のたびに増え続ける読み込みコストは発生しない）。
+#
+# コスト最適化:
+#   各ステップは元々タスクの難易度でモデルを使い分けている（sonnet/haiku/opus）。
+#   加えて `--max-budget-usd` で各ステップのAPI支出に上限を設け、暴走時のコスト増を防ぐ。
 #
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
 
@@ -104,6 +110,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
             --model claude-sonnet-5
+            --max-budget-usd 2
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*),Bash(git mv:*)"
           prompt: |
             .github/claude/prompts/organize-docs.md を読み、その指示に従って作業すること。
@@ -121,6 +128,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
             --model claude-sonnet-5
+            --max-budget-usd 2
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*),Bash(git mv:*)"
           prompt: |
             .github/claude/prompts/organize-claude-md.md を読み、その指示に従って作業すること。
@@ -138,6 +146,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
             --model claude-sonnet-5
+            --max-budget-usd 2
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/organize-rules.md を読み、その指示に従って作業すること。
@@ -155,6 +164,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
             --model claude-haiku-4-5
+            --max-budget-usd 1
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/describe-repo.md を読み、その指示に従って作業すること。
@@ -172,6 +182,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
             --model claude-opus-4-8
+            --max-budget-usd 3
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
           prompt: |
             .github/claude/prompts/implementation-plan.md を読み、その指示に従って作業すること。

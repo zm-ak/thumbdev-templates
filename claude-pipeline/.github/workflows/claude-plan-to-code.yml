@@ -2,7 +2,16 @@ name: Claude Code - Plan to Code
 
 # docs pipeline のPR（claude/docs-pipeline-* ブランチ）がデフォルトブランチへマージされたら起動する。
 #   1. リポジトリ説明（.github/repo-description.txt）をGitHubへ反映
-#   2. docs/plan/実装計画.md に従ってタスクIssueを作成し、先頭から実装してPRを作成 (claude-opus-4-8)
+#   2. docs/plan/実装計画.md に従ってタスクIssueを作成し、先頭から実装してPRを作成
+#
+# コスト最適化:
+#   - 今回実装する先頭 $MAX_TASKS 件の「未着手」タスクの「規模」を実装計画から読み取り、
+#     その中に「大」が1件でもあればOpus、無ければSonnetを使う。実装計画のタスクは
+#     ほとんどが小・中規模のため、全実行をOpus固定にするより大幅にコストを抑えられる。
+#   - Sonnetが基本になったことで1タスクあたりの単価が下がったため、MAX_TASKSを
+#     3→5に引き上げ、1回のセッション起動（CLAUDE.md・設計ドキュメント読込等の
+#     オーバーヘッド）でより多くのタスクを消化できるようにしている。
+#   - `--max-budget-usd` で1回の実行あたりのAPI支出に上限を設け、暴走時のコスト増を防ぐ。
 #
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）
 # 任意の設定: REPO_ADMIN_TOKEN（repo権限のPAT。リポジトリ説明の自動反映、およびPR作成が許可されない場合のフォールバック用）
@@ -63,7 +72,7 @@ jobs:
        startsWith(github.event.pull_request.head.ref, 'claude/docs-pipeline-'))
     runs-on: ubuntu-latest
     env:
-      MAX_TASKS: 3 # 1回の実行で実装するタスク数の上限
+      MAX_TASKS: 5 # 1回の実行で実装するタスク数の上限
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -90,7 +99,36 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 実装計画に従ったコード生成 (opus)
+      - name: 対象タスクの規模からモデルを決定
+        id: model
+        if: steps.plan.outputs.exists == 'true'
+        run: |
+          python3 - <<'PYEOF'
+          import os, re
+
+          max_tasks = int(os.environ.get("MAX_TASKS", "3"))
+          with open("docs/plan/実装計画.md", encoding="utf-8") as f:
+              text = f.read()
+
+          blocks = re.findall(r'^###\s+TASK-\d+.*?(?=^###\s+TASK-\d+|\Z)', text, re.M | re.S)
+
+          scales = []
+          for block in blocks:
+              status = re.search(r'ステータス:\s*(\S+)', block)
+              scale = re.search(r'規模:\s*(\S+)', block)
+              if status and status.group(1) == "未着手":
+                  scales.append(scale.group(1) if scale else "中")
+                  if len(scales) >= max_tasks:
+                      break
+
+          model = "claude-opus-4-8" if "大" in scales else "claude-sonnet-5"
+          print(f"対象タスクの規模: {scales or '不明'} -> モデル: {model}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"model={model}\n")
+          PYEOF
+
+      - name: 実装計画に従ったコード生成
         if: steps.plan.outputs.exists == 'true'
         uses: anthropics/claude-code-action@v1
         env:
@@ -100,7 +138,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
-            --model claude-opus-4-8
+            --model ${{ steps.model.outputs.model }}
+            --max-budget-usd 6
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(npm:*),Bash(yarn:*),Bash(pnpm:*),Bash(npx:*)"
           prompt: |
             .github/claude/prompts/generate-code.md を読み、その指示に従って作業すること。
