@@ -13,6 +13,13 @@ name: Claude Code - Issue to PR
 #   `claude-resume` ラベルの付与、または `@claude` コメントで再実行すると、
 #   既存の作業ブランチをチェックアウトし、直前の作業経過から続きを実施する（最初からやり直さない）。
 #
+# コスト最適化:
+#   - Issue本文の「規模: 小/中/大」を読み取り、規模に応じてモデルを切り替える
+#     （大のみOpus、それ以外はSonnet）。実装計画のタスクはほとんどが小・中規模のため、
+#     全タスクをOpus固定にするより大幅にコストを抑えられる。
+#   - `issues.opened` と `issues.labeled` が同一Issueに対してほぼ同時に発火し、
+#     二重起動することがあるため、Issue単位のconcurrency groupで後発を打ち切る。
+#
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル、`claude-resume` ラベル
 # 任意の設定: REPO_ADMIN_TOKEN（repoスコープのPAT。GITHUB_TOKENでのPR作成が許可されない場合のフォールバック用）
 
@@ -28,6 +35,10 @@ permissions:
   issues: write
   id-token: write
   actions: write
+
+concurrency:
+  group: claude-issue-to-pr-${{ github.event.issue.number }}
+  cancel-in-progress: true
 
 jobs:
   claude:
@@ -52,6 +63,20 @@ jobs:
         with:
           node-version: '24'
 
+      - name: タスク規模からモデルを決定
+        id: model
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          SCALE=$(printf '%s\n' "$ISSUE_BODY" | grep -oP '(?<=規模:\s)(小|中|大)' | head -n1 || true)
+          if [ "$SCALE" = "大" ]; then
+            MODEL="claude-opus-4-8"
+          else
+            MODEL="claude-sonnet-5"
+          fi
+          echo "Issueの規模: ${SCALE:-不明（デフォルトSonnet）} -> モデル: $MODEL"
+          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         env:
@@ -63,13 +88,15 @@ jobs:
           # plan-to-code が Claude Bot として作成した Issue 起点を許可する
           allowed_bots: "claude"
           claude_args: >-
-            --model claude-opus-4-8
+            --model ${{ steps.model.outputs.model }}
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(npm:*),Bash(yarn:*),Bash(pnpm:*),Bash(npx:*)"
           prompt: |
             あなたはこのリポジトリの実装担当（Claude Code）です。
             以下のルールに従ってください。優先度は上から順です。
 
             1. リポジトリに CLAUDE.md や開発ガイド（docs/ 配下）が存在する場合は必ず読み、従うこと。
+               ただし設計ドキュメントは、このIssueの対象範囲に関連する章のみで判断できる場合、
+               全文を読み直す必要はない（再開時のトークン消費を抑えるため）。
             2. 実装対象は、このIssue（#${{ github.event.issue.number }}）に書かれた範囲のみとする。
                関係のないリファクタや整形は行わないこと。
             3. Issueの内容が曖昧、または設計ドキュメントと矛盾する場合は、実装を進めず
@@ -84,6 +111,8 @@ jobs:
                  そのブランチを `git fetch` してチェックアウトする（新規ブランチは作らない）。
                  既存のコミット履歴と、このIssueの最新の「## 作業経過」コメントを読み、
                  そこまでの内容を前提に続きから作業する。設計や実装済み部分をやり直さない。
+                 実装済みファイルは `git show` / `git diff` で変更点を確認する程度に留め、
+                 全文を読み直さない（再開のたびに毎回コンテキストを再構築するコストを抑えるため）。
                - 存在しない場合: 新規にブランチを作成する。
             6. コミットメッセージは Conventional Commits に従うこと（feat:, fix:, refactor: など）。
                実装がまとまった単位（ファイル群・機能単位）に分けられる場合は、
