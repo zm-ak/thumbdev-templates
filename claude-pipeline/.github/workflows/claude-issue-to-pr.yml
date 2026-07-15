@@ -19,6 +19,8 @@ name: Claude Code - Issue to PR
 #     全タスクをOpus固定にするより大幅にコストを抑えられる。
 #   - `issues.opened` と `issues.labeled` が同一Issueに対してほぼ同時に発火し、
 #     二重起動することがあるため、Issue単位のconcurrency groupで後発を打ち切る。
+#   - `--max-budget-usd` で1回の実行あたりのAPI支出に上限を設け、意図しない
+#     暴走（無限リトライ等）でコストが跳ね上がることを防ぐ（通常のタスクはこの上限に達しない）。
 #
 # 必要な設定: ANTHROPIC_API_KEY（Actions Secret）、`claude-task` ラベル、`claude-resume` ラベル
 # 任意の設定: REPO_ADMIN_TOKEN（repoスコープのPAT。GITHUB_TOKENでのPR作成が許可されない場合のフォールバック用）
@@ -89,6 +91,7 @@ jobs:
           allowed_bots: "claude"
           claude_args: >-
             --model ${{ steps.model.outputs.model }}
+            --max-budget-usd 3
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(npm:*),Bash(yarn:*),Bash(pnpm:*),Bash(npx:*)"
           prompt: |
             あなたはこのリポジトリの実装担当（Claude Code）です。
