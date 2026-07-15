@@ -1,0 +1,46 @@
+name: Claude Code - ラベル自動作成
+
+# claude-issue-to-pr.yml / claude-plan-to-code.yml が前提とするラベル
+# （claude-task / claude-resume）を自動で作成・更新する。
+#
+# 従来はREADME「ユーザーリポジトリ側で必要な設定」に「未作成なら `gh label create` で
+# 手動作成」と案内していたが、導入者の作業を減らすためラベル作成そのものを自動化する。
+# 本ファイルまたは他のclaude-*.ymlがデフォルトブランチへpushされたとき
+# （パイプライン導入・更新時）と、手動実行（workflow_dispatch）で起動する。
+# `gh label create --force` は既存ラベルがあれば説明・色を更新し、無ければ作成するため、
+# 何度実行しても安全（冪等）。
+#
+# 必要な設定: なし（GITHUB_TOKEN のみで動作する）
+
+on:
+  push:
+    paths:
+      - '.github/workflows/claude-setup-labels.yml'
+      - '.github/workflows/claude-issue-to-pr.yml'
+      - '.github/workflows/claude-plan-to-code.yml'
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+jobs:
+  setup-labels:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 必須ラベルを作成・更新
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "claude-task" \
+            --repo "${{ github.repository }}" \
+            --color "1D76DB" \
+            --description "Claude Codeによる自動実装を起動する" \
+            --force
+          gh label create "claude-resume" \
+            --repo "${{ github.repository }}" \
+            --color "FBCA04" \
+            --description "中断したClaude Code実装を既存ブランチ・ハンドオフファイルから再開する" \
+            --force
